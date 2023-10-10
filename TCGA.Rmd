@@ -1,0 +1,108 @@
+---
+title: ''
+author: "TCGA Analysis"
+date: "2023-10-09"
+output: html_document
+---
+#load required packages
+```{r setup, include=FALSE}
+library(TCGAbiolinks)
+library(tidyverse)
+library(maftools)
+library(pheatmap)
+library(SummarizedExperiment)
+```
+
+#projects available on TCGA portal, lets find ones related to breast cancer
+```{r}
+gdcprojects <- getGDCprojects()
+getProjectSummary("TCGA-BRCA")
+```
+
+#lets build a query to download gene expression, dna methylation and mutation data. (project and data.category are mandatory parameters)
+
+```{r}
+query_TCGA <- GDCquery(project = 'TCGA-BRCA', data.category = 'Transcriptome Profiling')
+output_query <- getResults(query_TCGA) #allows for file viewing
+```
+#lets use only RNA-seq data with STAR counts and with open access files. 
+```{r}
+query_TCGA <- GDCquery(project = 'TCGA-BRCA', 
+                       data.category = 'Transcriptome Profiling',
+                       experimental.strategy = 'RNA-Seq',
+                       workflow.type = 'STAR - Counts', 
+                       access = 'open',
+                       barcode = c('TCGA-A7-A26E-01B-06R-A277-07', 'TCGA-A2-A0CU-01A-12R-A034-07', 'TCGA-PL-A8LV-01A-21R-A41B-07'))
+getResults(query_TCGA)
+```
+#Lets download these files
+```{r}
+GDCdownload(query_TCGA)
+```
+#return a summarized experiment object
+```{r}
+tcga_brca_data <- GDCprepare(query_TCGA, summarizedExperiment = TRUE)
+brca_matrix <- assay(tcga_brca_data, 'fpkm_unstrand') #these counts can be used for DEG analysis
+```
+#Query for DNA methylation data indicating the platform that was used and indicating methylation signal intensity. 
+```{r}
+query_methyl <- GDCquery(project = 'TCGA-GBM', 
+                         data.category = 'DNA Methylation',
+                         platform = 'Illumina Human Methylation 27',
+                         access = 'open',
+                         data.type = 'Methylation Beta Value')
+
+output_query_methyl <- getResults(query_methyl)
+```
+#lets select specific files from that query and download them. 
+
+```{r}
+query_methyl <- GDCquery(project = 'TCGA-GBM', 
+                         data.category = 'DNA Methylation',
+                         platform = 'Illumina Human Methylation 27',
+                         access = 'open',
+                         data.type = 'Methylation Beta Value',
+                         barcode = c('TCGA-02-0069-01A-01D-0199-05', 'TCGA-14-0789-01A-01D-0392-05'))
+GDCdownload(query_methyl)
+dna_met <- GDCprepare(query_methyl, summarizedExperiment = TRUE)
+```
+#lets explore the data and look at the variance across the samples via probes( different methylation trends between samples)
+```{r}
+assay(dna_met)
+idx <- dna_met %>%
+  assay %>%
+  rowVars()%>%
+  order(decreasing = TRUE) %>% 
+  head(10)
+```
+#lets plot a heat map witht the different methylation patterns of the probes
+```{r}
+pheatmap(assay(dna_met)[idx,])
+```
+#Lets download and visualized specific mutation data from TCGA
+```{r}
+query_mutation <- GDCquery(project = 'TCGA-BRCA', data.category = 'Simple Nucleotide Variation', access = 'open', barcode = c("TCGA-LL-A73Y-01A-11D-A33E-09,TCGA-LL-A73Y-10B-01D-A33H-09", "TCGA-E9-A1NH-01A-11D-A14G-09,TCGA-E9-A1NH-11A-33D-A14G-09"))
+
+output_query_mutation <- getResults(query_mutation)
+
+GDCdownload(query_mutation)
+
+```
+#lets use functions from the maftools library to read the object and generate visuals and dashboards 
+```{r}
+maf = GDCprepare(query_mutation, summarizedExperiment = TRUE)
+maftools.input <- read.maf(maf)
+
+#this summarizes mutation information from these cases. 
+plotmafSummary(maf = maftools.input,
+               addStat = 'median',
+               rmOutlier = TRUE,
+               dashboard = TRUE)
+
+#columns = samples rows = mutated genes, type of mutation in gene and frequency of it.  
+oncoplot(maf = maftools.input, top = 10, removeNonMutated = TRUE)
+
+
+```
+
+
